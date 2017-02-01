@@ -1,0 +1,51 @@
+#ifndef COMPRESSOR
+#define COMPRESSOR
+
+#include <osg/ValueObject> // {set,get}UserValue
+#include <osg/Notify>
+
+#include "GeometryUniqueVisitor"
+
+
+class Compressor : public GeometryUniqueVisitor
+{
+public:
+    Compressor(unsigned int mode, int bits):
+        GeometryUniqueVisitor("Compressor"),
+        _mode(mode),
+        _bits(bits)
+    {}
+
+    void process(osg::Geometry& geometry) {
+        bool isCompressed = false;
+        if(geometry.getUserValue("isCompressed", isCompressed) && isCompressed)
+        {
+            decompress(geometry);
+            geometry.setUserValue("isCompressed", false);
+        }
+        else
+        {
+            compress(geometry);
+            geometry.setUserValue("isCompressed", true);
+        }
+    }
+
+
+    void compress(osg::Geometry& geometry)
+    {
+        OSG_WARN << "Compressing geometry " << geometry.getName() << "..." << std::endl;
+    }
+
+
+    void decompress(osg::Geometry& geometry)
+    {
+        OSG_WARN << "Decompressing geometry " << geometry.getName() << "..." << std::endl;
+    }
+
+protected:
+    unsigned int _mode;
+    int _bits;
+};
+
+
+#endif
