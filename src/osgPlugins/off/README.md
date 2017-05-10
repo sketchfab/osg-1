@@ -1,7 +1,7 @@
 # Exercise: parsing OFF format
 
 Sketchfab aims at being a safe place for all 3D assets and as such, we need to support as many 3D formats as possible.
-We will therefore write a new [OpenSceneGraph](#openscenegraph) plugin to read the [OFF](http://paulbourke.net/dataformats/off/) format.
+We will therefore write a new [OpenSceneGraph](#openscenegraph) plugin to read the [OFF](https://en.wikipedia.org/wiki/OFF_(file_format)) format.
 
 
 ## Getting started
@@ -39,10 +39,15 @@ We will therefore write a new [OpenSceneGraph](#openscenegraph) plugin to read t
 ## To do
 
 1. add the plugin structure by copying other plugins
-1. implement the `osgDB::ReaderWriter::readNode` to parse OFF ascii files
-1. (optional) implement the `osgDB::ReaderWriter::writeNode` to dump OFF ascii files
-1. (optional) implement OFF binary support
+1. implement the `osgDB::ReaderWriter::readNode` to parse OFF ascii files containing polygonal meshes
+1. (optional) implement support for colors
+1. (optional) implement support for edges (interpret edges as polygons wireframe)
 1. open a [Pull Request](https://help.github.com/articles/about-pull-requests/) when done!
+
+Notes:
+* keep it simple
+* optional points may be chosen (or not) in any order!
+* consistency and robustness will be considered as much as feature complete-ness
 
 
 # OpenSceneGraph
