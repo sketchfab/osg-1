@@ -1,0 +1,29 @@
+B1. Object Files Format (.off)
+
+https://en.wikipedia.org/wiki/OFF_(file_format)
+http://segeval.cs.princeton.edu/public/off_format.html
+http://people.sc.fsu.edu/~jburkardt/data/off/off.html
+http://www.geomview.org/docs/html/OFF.html
+http://www.geomview.org/docs/html/Binary-format.html#Binary-format
+http://pgl10.chez.com/format_off.html
+
+
+Extension : off 
+Creator : Digital Equipment Corporation 
+Description : OFF was developed in 1986 by Randi J. Rost at Digital Equipment Corporation's 
+              Workstation Systems Engineering for the interchange and archiving of 3D objects. 
+              OFF is an ASCII-based format and is independent of languages, devices, and operating systems. 
+
+
+OFF (Object File Format) is a geometry definition file format containing 
+the description of the composing polygons of the 3D object
+
+Object files can be in ASCII format (.off) or binary format (.off with "BINARY").
+This appendix describes the ASCII format for object files format. These files
+must have the extension .off.
+
+
+In this release, the .off file format supports only [1..3] dimension (+ optionnal W/4 component).
+Notice: I didn't find some examples for full informations on vertex like specs talk about, 
+or also for binary version. So binary version is not really tested by real data.
+
