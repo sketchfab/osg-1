@@ -151,10 +151,12 @@ class OFFPrimitiveIndexWriter : public osg::PrimitiveIndexFunctor {
 
         virtual void begin(GLenum mode)
         {
+		(void) mode;
         }
 
         virtual void vertex(unsigned int vert)
         {
+		(void) vert;
         }
 
         virtual void end()
@@ -202,7 +204,7 @@ void OFFPrimitiveIndexWriter::drawArrays(GLenum mode,GLint first,GLsizei count)
 class CreateOFFVisitor : public osg::NodeVisitor
 {
 public:
-    CreateOFFVisitor(std::ostream& fout, const osgDB::ReaderWriter::Options* options = 0):
+    CreateOFFVisitor(std::ostream& fout):
         osg::NodeVisitor(osg::NodeVisitor::TRAVERSE_ACTIVE_CHILDREN),
         _fout(fout)
     {
@@ -342,8 +344,9 @@ public:
             return WriteResult(WriteResult::FILE_NOT_HANDLED);
         }
 
+	(void) options;
         osgDB::ofstream fp (fileName.c_str());
-        CreateOFFVisitor createOFFVisitor(fp, options);
+        CreateOFFVisitor createOFFVisitor(fp);
         const_cast<osg::Node&>(node).accept(createOFFVisitor);
 
         return WriteResult(WriteResult::FILE_SAVED);
@@ -352,7 +355,8 @@ public:
 
     virtual WriteResult writeNode(const osg::Node& node,std::ostream& fout,const Options* options=NULL) const
     {
-        CreateOFFVisitor createOFFVisitor(fout, options);
+	(void) options;
+        CreateOFFVisitor createOFFVisitor(fout);
         const_cast<osg::Node&>(node).accept(createOFFVisitor);
 
         return WriteResult(WriteResult::FILE_SAVED);
