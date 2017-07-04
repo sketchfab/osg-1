@@ -5,6 +5,7 @@
 #include <osg/Notify>
 
 #include "GeometryUniqueVisitor"
+#include "Array"
 
 
 class Compressor : public GeometryUniqueVisitor
@@ -31,14 +32,167 @@ public:
     }
 
 
-    void compress(osg::Geometry& geometry)
-    {
-        OSG_WARN << "Compressing geometry " << geometry.getName() << "..." << std::endl;
+	void compress(osg::Geometry& geometry)
+	{
+		osg::Array* VArr = geometry.getVertexArray();
+		unsigned int totalSpace = VArr->getTotalDataSize();
+		unsigned int uneditedSpace = totalSpace;
+
+		osg::Vec3Array* NArr = (osg::Vec3Array*)geometry.getNormalArray();
+		osg::Vec2Array* TArr = (osg::Vec2Array*)geometry.getTexCoordArray(0);
+		uneditedSpace += NArr->getTotalDataSize();
+		uneditedSpace += (TArr != nullptr) ? TArr->getTotalDataSize() : 0;
+
+		osg::Vec2Array* normals = new osg::Vec2Array;
+		normals->reserve(NArr->getNumElements());
+
+		// apply a spherical coordinates for normal compression
+		for (osg::Vec3 v : NArr->asVector())
+		{
+			// osg's Vec2 doesnt have scalar addition/subtration arithmetic?? WHY?
+			osg::Vec2 one(1.f, 1.f); // this hurts my eyes
+			normals->push_back((osg::Vec2(atan2(v.y(), v.x()) / osg::PI, v.z()) + one)*0.5f);
+		}
+
+		geometry.setNormalArray(normals, osg::Array::BIND_PER_VERTEX);
+		totalSpace += normals->getTotalDataSize();
+
+		// i figured using a simple float to half would be beneficial for texture coords
+		// cant tell if its an issue with quality however
+		if (TArr != nullptr)
+		{
+			osg::Vec2usArray* textures = new osg::Vec2usArray;
+			textures->reserve(TArr->size());
+			for (osg::Vec2 v : TArr->asVector())
+			{
+				float x = v.x();
+				float y = v.y();
+				unsigned int xint = *((unsigned int*)&x);
+				unsigned int yint = *((unsigned int*)&y);
+				// convert from 32 bit float to 16 bit (sign | exponent | fraction)
+				// this is not a great way, it does not handle overflow or underflow but is cheap and easy
+				// we could make it a lot more accurate by using a base table and shift table
+				unsigned short xhalf = (xint >> 16) & 0x8000 | (((xint & 0x7f800000) - 0x3800000) >> 13) & 0x7c00 | (xint >> 13) & 0x3ff;
+				unsigned short yhalf = (yint >> 16) & 0x8000 | (((yint & 0x7f800000) - 0x3800000) >> 13) & 0x7c00 | (yint >> 13) & 0x3ff;
+				textures->push_back(osg::Vec2us(*((unsigned short*)&xhalf), *((unsigned short*)&yhalf)));
+			}
+			geometry.setTexCoordArray(0, textures);
+			totalSpace += textures->getTotalDataSize();
+		}
+
+		/// I thought to optimize the index buffer by converting from uint to shorts using DrawElementsUShort
+		/// somehow i was not seeing a benefit, i thought this was from DrawElementsUShort not writing shorts...
+		/// turns out its just the LZMA compressor, seems to optimize the wasted bits in the uints
+		/// so this was a fair waste of time!
+		osg::DrawElementsUInt* arr = (osg::DrawElementsUInt*)geometry.getPrimitiveSet(0);
+		//unsigned int maxIndex = 0;
+		//// loop is O(n) so its cheap
+		//for (int i = 0; i < arr->getNumIndices(); i++)
+		//{
+		//	if (arr->index(i) > maxIndex)
+		//	{
+		//		maxIndex = arr->index(i);
+		//	}
+		//}
+		// main code for the compression
+		//if (maxIndex <= 65535)
+		//{
+			// first buffer code, doesnt work
+			//// create new buffer
+			//osg::DrawElementsUShort* shortBuffer = new osg::DrawElementsUShort(arr->getMode());
+			//unsigned int newSize = ceil(arr->getNumIndices() * 0.5f);
+
+			//// I thought of splicing the shorts into one int when the DrawElementsUShort wasnt working
+			////for (int i = 0; i < newSize; i++)
+			////{
+			////	unsigned int left = arr->getElement(i*2);
+			////	unsigned int right = arr->getElement(i * 2 + 1);
+			////	unsigned int splice = left << 16;
+			////	splice |= right;
+
+			////	tempArray.push_back(splice);
+			////}
+
+			//// copy contents over to new buffer
+			//shortBuffer->reserve(arr->getNumIndices());
+			//for (int i = 0; i < arr->getNumIndices(); i++)
+			//{
+			//	shortBuffer->push_back((unsigned short)arr->getElement(i));
+			//}
+			
+			//geometry.setPrimitiveSet(0, shortBuffer);
+			//geometry.setUserValue("indexShort", true);
+		//}
+		//else
+		//	geometry.setUserValue("indexShort", false);
+
+		totalSpace += arr->getTotalDataSize();
+		uneditedSpace += arr->getTotalDataSize();
+
+		OSG_WARN << "Reduced by: " << 100.f - (((float)totalSpace / uneditedSpace) * 100.f) << "%" << std::endl;
     }
 
 
     void decompress(osg::Geometry& geometry)
     {
+		osg::Vec2Array* NArr = (osg::Vec2Array*)geometry.getNormalArray();
+		osg::Vec2usArray* TArr = (osg::Vec2usArray*)geometry.getTexCoordArray(0);
+
+		// reconstruct normals
+		osg::Vec3Array* normals = new osg::Vec3Array;
+		normals->reserve(NArr->getNumElements());
+
+		// apply a spherical coordiantes for normal decompression
+		for (osg::Vec2 v : NArr->asVector())
+		{
+			osg::Vec2 one(1.f, 1.f); // this hurts my eyes
+			osg::Vec2 ang = v * 2 - one;
+			osg::Vec2 sincosTheta(sin(ang.x() * osg::PI), cos(ang.x() * osg::PI));
+			osg::Vec2 sincosPhi(sqrt(1.f - ang.y()*ang.y()), ang.y());
+			normals->push_back(osg::Vec3(sincosTheta.y()*sincosPhi.x(), sincosTheta.x()*sincosPhi.x(), sincosPhi.y()));
+		}
+
+		geometry.setNormalArray(normals, osg::Array::BIND_PER_VERTEX);
+
+		// get the 16 float tex coords to 32 bit again
+		if (TArr != nullptr)
+		{
+			osg::Vec2Array* textures = new osg::Vec2Array;
+			textures->reserve(TArr->size());
+			for (osg::Vec2us v : TArr->asVector())
+			{
+				unsigned short x = v.x();
+				unsigned short y = v.y();
+				// convert from 16 bit float to 32 bit (sign | exponent | fraction)
+				// again this is a simple conversion which suffers from many problems
+				// a better solution would be to use tables (mantissa, exponent and offset)
+				float xfull = (x & 0x8000) << 16 | ((x & 0x7c00) + 0x1C000) << 13 | (x & 0x3FF) << 13;
+				float yfull = (y & 0x8000) << 16 | ((y & 0x7c00) + 0x1C000) << 13 | (y & 0x3FF) << 13;
+				textures->push_back(osg::Vec2(xfull, yfull));
+			}
+			geometry.setTexCoordArray(0, textures);
+		}
+
+		// not needed anymore...
+		// reconstruct the index buffer, osg should have the functionality of having ushort index buffers however...
+		//osg::DrawElementsUShort* arr = (osg::DrawElementsUShort*)geometry.getPrimitiveSet(0);
+		//bool isShort = false;
+		//if (geometry.getUserValue("indexShort", isShort) && isShort)
+		//{
+		//	// create new buffer
+		//	osg::DrawElementsUInt* uintBuffer = new osg::DrawElementsUInt(arr->getMode());
+
+		//	// copy contents over to new buffer
+		//	uintBuffer->reserve(arr->getNumIndices());
+		//	for (int i = 0; i < arr->getNumIndices(); i++)
+		//	{
+		//		uintBuffer->push_back((unsigned int)arr->getElement(i));
+		//	}
+
+		//	geometry.setPrimitiveSet(0, uintBuffer);
+		//}
+		
+
         OSG_WARN << "Decompressing geometry " << geometry.getName() << "..." << std::endl;
     }
 
