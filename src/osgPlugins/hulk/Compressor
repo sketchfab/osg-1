@@ -5,46 +5,327 @@
 #include <osg/Notify>
 
 #include "GeometryUniqueVisitor"
+#include <cmath>
+#include "CompressorNormals.hpp"
+#include "CompressIndices.hpp"
 
+//Works only because the texcoord is between 0 and 1
+//Compress a float to an unsigned short
+unsigned short compress32To16(float f) {
+    return f*USHRT_MAX;
+}
+
+//Decompress an unsigned short to a float, loose information at 1e-5
+float decompress16To32(unsigned short h) {
+    return (float)h/(float)USHRT_MAX; 
+}
+
+//Compress normals from XYZ to XY using octahedron method, less max errors than Spherical coordinates
+osg::Vec2Array* compressNormals(osg::Vec3Array *oldNormals) {
+
+    osg::Vec2Array* newNormals = new osg::Vec2Array();
+    newNormals->reserve(oldNormals->getNumElements());
+
+    //float maxErrorMethod1 = 0;
+    //float maxErrorMethod2 = 0;
+    for(size_t i = 0; i < oldNormals->getNumElements(); ++i) {
+        osg::Vec3 v = (*oldNormals)[i];
+        //maxErrorMethod1 = std::max(maxErrorMethod1, (DecodeOcthahedron(EncodeOctahedron(v)) - v).length());
+        //maxErrorMethod2 = std::max(maxErrorMethod2, (DecodeSphericalCoordinate(EncodeSphericalCoordinate(v)) - v).length());
+
+        newNormals->push_back(encodeOctahedron(v));
+    }
+    //OSG_WARN << "Method1 " << maxErrorMethod1 << " " << std::endl;
+    //OSG_WARN << "Method2 " << maxErrorMethod2 << " " << std::endl;
+
+    return newNormals;
+}
+
+
+// Compression with delta encoding not possible for indices inferioirs to unsigned short size
+// Implementing the delta encoding for indices containes in INT maybe useful
+// Maybe useful for large objects, to pass from unsigned int to unsigned short (Google Body)
+osg::DrawElementsUShort* compressIndices(osg::DrawElementsUInt* oldIndices) {
+
+    if(oldIndices->getNumIndices() <= USHRT_MAX) {
+        osg::DrawElementsUShort* newIndices = new osg::DrawElementsUShort(oldIndices->getMode());
+        newIndices->reserve(oldIndices->getNumIndices());
+        for(size_t i = 0; i < oldIndices->getNumIndices(); ++i) {
+            unsigned short index = (*oldIndices)[i];
+            newIndices->push_back(index);
+        }
+        return newIndices;
+    }
+
+    return NULL;
+}
+
+//Decompress the indices packed on unsigned short to int
+osg::DrawElementsUInt* decompressIndices(osg::DrawElementsUShort* oldIndices) {
+    osg::DrawElementsUInt* newIndices = new osg::DrawElementsUInt(oldIndices->getMode());
+
+    for(size_t i = 0; i < oldIndices->getNumIndices(); ++i) {
+        unsigned int index = (*oldIndices)[i];
+        newIndices->push_back(index);
+    }
+    return newIndices;
+}
+
+//Compress texcoords from float to unsigned short
+//The textures are too small for a difference. If the texture is larger than 4k a difference may appear
+osg::Vec2usArray* compressTexCoords(osg::Vec2Array *oldTexCoords) {
+
+    osg::Vec2usArray* newTexCoords = new osg::Vec2usArray();
+    newTexCoords->reserve(oldTexCoords->getNumElements());
+
+    for(size_t i = 0; i < oldTexCoords->getNumElements(); ++i) {
+        osg::Vec2 v = (*oldTexCoords)[i];
+        osg::Vec2us texcoords(compress32To16(v.x()), compress32To16(v.y()));
+        //OSG_WARN << v.x() << " " << decompress16To32(compress32To16(v.x())) << std::endl;
+        newTexCoords->push_back(texcoords);
+
+    }
+    return newTexCoords;
+}
+
+//Decompress indices from unsigned short to float
+osg::Vec2Array* decompressTexCoords(osg::Vec2usArray *oldTexCoords) {
+
+    osg::Vec2Array* newTexCoords = new osg::Vec2Array();
+    newTexCoords->reserve(oldTexCoords->getNumElements());
+
+    for(size_t i = 0; i < oldTexCoords->getNumElements(); ++i) {
+        osg::Vec2us v = (*oldTexCoords)[i];
+        osg::Vec2 texcoords(decompress16To32(v.x()), decompress16To32(v.y()));
+        newTexCoords->push_back(texcoords);
+
+    }
+    return newTexCoords;
+}
+
+//Decompress normals using the octahedron method
+osg::Vec3Array* decompressNormals(osg::Vec2Array *oldNormals) {
+
+    osg::Vec3Array* newNormals = new osg::Vec3Array();
+    newNormals->reserve(oldNormals->getNumElements());
+
+    for(size_t i = 0; i < oldNormals->getNumElements(); ++i) {
+        osg::Vec2 v = (*oldNormals)[i];
+        newNormals->push_back(decodeOcthahedron(v));
+    }
+
+    oldNormals->clear();
+    return newNormals;
+}
+
+//Begining of parallelogramm prediction
+//First quantization on an unsigned short
+osg::Vec3usArray* quantizationVertices(osg::Vec3Array *oldVertices, osg::Vec3 &min, osg::Vec3 &max) {
+    osg::Vec3usArray *newVertices = new osg::Vec3usArray();
+    min.set(0,0,0);
+    max.set(0,0,0);
+
+    //Find bounding box
+    for(unsigned int i = 0; i < oldVertices->getNumElements(); ++i) {
+        osg::Vec3 v = (*oldVertices)[i];
+
+        //Max of the bounding box
+        if(v.x() > max.x()) {
+            max.x() = v.x();
+        }
+        
+        if(v.y() > max.y()) {
+            max.y() = v.y();
+        }
+
+        if(v.z() > max.z()) {
+            max.z() = v.z();
+        }
+
+        //Min of the bounding box
+        if(v.x() <  min.x()) {
+            min.x() = v.x();
+        }
+        
+        if(v.y() < min.y()) {
+            min.y() = v.y();
+        }
+
+        if(v.z() < min.z()) {
+            min.z() = v.z();
+        }
+    }
+    newVertices->reserve(oldVertices->getNumElements());
+    for(unsigned int i = 0; i < oldVertices->getNumElements(); ++i) {
+        osg::Vec3 v = (*oldVertices)[i];
+        newVertices->push_back(osg::Vec3us(compress32To16((v.x() - min.x())/(max.x() - min.x())),
+                                           compress32To16((v.y() - min.y())/(max.y() - min.y())),
+                                           compress32To16((v.z() - min.z())/(max.z() - min.z()))));
+    }
+    return newVertices;
+
+}
+
+//Dequantization of the vertices using the min/max of the bounding box computed during the compression
+osg::Vec3Array* dequantizationVertices(osg::Vec3usArray *oldVertices, const osg::Vec3 &min, const osg::Vec3 &max) {
+    osg::Vec3Array *newVertices = new osg::Vec3Array();
+
+    newVertices->reserve(oldVertices->getNumElements());
+    for(unsigned int i = 0; i < oldVertices->getNumElements(); ++i) {
+        osg::Vec3us v = (*oldVertices)[i];
+        newVertices->push_back(osg::Vec3(decompress16To32(v.x())*(max.x() - min.x()) + min.x(),
+                                           decompress16To32(v.y())*(max.y() - min.y()) + min.y(),
+                                           decompress16To32(v.z())*(max.z() - min.z()) + min.z()));
+    }
+
+    return newVertices;
+
+}
 
 class Compressor : public GeometryUniqueVisitor
 {
-public:
-    Compressor(unsigned int mode, int bits):
-        GeometryUniqueVisitor("Compressor"),
-        _mode(mode),
-        _bits(bits)
+    public:
+        Compressor(unsigned int mode, int bits):
+            GeometryUniqueVisitor("Compressor"),
+            _mode(mode),
+            _bits(bits)
     {}
 
-    void process(osg::Geometry& geometry) {
-        bool isCompressed = false;
-        if(geometry.getUserValue("isCompressed", isCompressed) && isCompressed)
-        {
-            decompress(geometry);
-            geometry.setUserValue("isCompressed", false);
+        void process(osg::Geometry& geometry) {
+            bool isCompressed = true;
+            if(geometry.getUserValue("isCompressed", isCompressed) && isCompressed)
+            {
+                decompress(geometry);
+                geometry.setUserValue("isCompressed", false);
+            }
+            else
+            {
+                compress(geometry);
+                geometry.setUserValue("isCompressed", true);
+            }
         }
-        else
+
+
+
+        void compress(osg::Geometry& geometry)
         {
-            compress(geometry);
-            geometry.setUserValue("isCompressed", true);
+            OSG_WARN << "Compressing geometry " << geometry.getName() << "..." << std::endl;
+            //To measure the compression
+            size_t beforeCompression = 0;
+            size_t afterCompression = 0;
+
+            //Compress the vertices
+            osg::Vec3Array* oldVertices = (osg::Vec3Array*)geometry.getVertexArray();
+            if(oldVertices) {
+                osg::Vec3 min;
+                osg::Vec3 max;
+                beforeCompression += oldVertices->getTotalDataSize();
+                osg::Vec3usArray* newVertices = quantizationVertices(oldVertices, min, max);
+                afterCompression += newVertices->getTotalDataSize();
+                geometry.setVertexArray(newVertices);
+                geometry.setUserValue("MinVertices", min);
+                geometry.setUserValue("MaxVertices", max);
+            }
+
+            //Compress the normals
+            osg::Vec3Array* oldNormals = (osg::Vec3Array*)geometry.getNormalArray();
+            if(oldNormals) {
+                beforeCompression += oldNormals->getTotalDataSize();
+                osg::Vec2Array* newNormals = compressNormals(oldNormals);
+                afterCompression += newNormals->getTotalDataSize();
+                geometry.setNormalArray(newNormals);
+            }
+
+            //Compress the uvs
+            osg::Vec2Array* oldTexCoords = (osg::Vec2Array*)geometry.getTexCoordArray(0);
+            if(oldTexCoords) {
+                beforeCompression += oldTexCoords->getTotalDataSize();
+                osg::Vec2usArray* newTexCoords = compressTexCoords(oldTexCoords);
+                afterCompression += newTexCoords->getTotalDataSize();
+                geometry.setTexCoordArray(0, newTexCoords);
+            }
+
+            //Compress the indices
+            osg::DrawElementsUInt* oldIndices = (osg::DrawElementsUInt*)geometry.getPrimitiveSet(0);
+            if(oldIndices) {
+                
+                //Pack the indices
+                osg::DrawElementsUInt* newTempIndices = new osg::DrawElementsUInt(oldIndices->getMode());
+                pack_inds(*newTempIndices, *oldIndices);
+                osg::DrawElementsUShort* newIndices = compressIndices(newTempIndices);
+
+                //Convert to unsigned short if possible
+                if(newIndices) {
+                    beforeCompression += oldIndices->getTotalDataSize();
+                    afterCompression += newIndices->getTotalDataSize();
+
+                    geometry.setPrimitiveSet(0, newIndices);
+                    geometry.setUserValue("primitiveUnsignedShort", true);
+                } else {
+
+                    beforeCompression += oldIndices->getTotalDataSize();
+                    afterCompression += newTempIndices->getTotalDataSize();
+
+                    geometry.setPrimitiveSet(0, newTempIndices);
+                    geometry.setUserValue("primitiveUnsignedShort", false);
+                }
+            }
+            OSG_WARN << "Percentage compressed " << 100 - 100*((float)afterCompression/(float)beforeCompression) << std::endl;
         }
-    }
 
 
-    void compress(osg::Geometry& geometry)
-    {
-        OSG_WARN << "Compressing geometry " << geometry.getName() << "..." << std::endl;
-    }
+        void decompress(osg::Geometry& geometry)
+        {
+            OSG_WARN << "Decompressing geometry " << geometry.getName() << "..." << std::endl;
+
+            //Decompress the vertices
+            osg::Vec3usArray* oldVertices = (osg::Vec3usArray*)geometry.getVertexArray();
+            if(oldVertices) {
+                osg::Vec3 min;
+                osg::Vec3 max;
+                geometry.getUserValue("MinVertices", min);
+                geometry.getUserValue("MaxVertices", max);
+                geometry.setVertexArray(dequantizationVertices(oldVertices, min, max));
+            }
+
+            //Decompress the normals
+            osg::Vec2Array* oldNormals = (osg::Vec2Array*)geometry.getNormalArray();
+            if(oldNormals) {
+                geometry.setNormalArray(decompressNormals(oldNormals), osg::Array::BIND_PER_VERTEX);
+            }
+
+            //Decompress the UVS
+            osg::Vec2usArray* oldTexCoords = (osg::Vec2usArray*)geometry.getTexCoordArray(0);
+            if(oldTexCoords) {
+                geometry.setTexCoordArray(0, decompressTexCoords(oldTexCoords));
+            }
+
+            //Decompress the indices and unpack them
+            bool shortValue = false;
+            if(geometry.getUserValue("primitiveUnsignedShort", shortValue)) {
+                osg::DrawElementsUShort* oldIndices = (osg::DrawElementsUShort*)geometry.getPrimitiveSet(0);
+                if(oldIndices) {
+                    osg::DrawElementsUInt* newIndices = decompressIndices(oldIndices);
+                    osg::DrawElementsUInt* newTempIndices = new osg::DrawElementsUInt(newIndices->getMode());
+                    unpack_inds(*newTempIndices, *newIndices);
 
 
-    void decompress(osg::Geometry& geometry)
-    {
-        OSG_WARN << "Decompressing geometry " << geometry.getName() << "..." << std::endl;
-    }
+                    geometry.setPrimitiveSet(0, newTempIndices);
+                }
+            } else {
 
-protected:
-    unsigned int _mode;
-    int _bits;
+                osg::DrawElementsUInt* oldIndices = (osg::DrawElementsUInt*)geometry.getPrimitiveSet(0);
+                if(oldIndices) {
+                    osg::DrawElementsUInt* newTempIndices = new osg::DrawElementsUInt(oldIndices->getMode());
+                    unpack_inds(*newTempIndices, *oldIndices);
+                    geometry.setPrimitiveSet(0, newTempIndices);
+                }
+            }
+        }
+
+    protected:
+        unsigned int _mode;
+        int _bits;
 };
 
 
