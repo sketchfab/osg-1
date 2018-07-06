@@ -316,6 +316,8 @@ IF(ZEROCONF_FOUND)
     ADD_PLUGIN_DIRECTORY(ZeroConfDevice)
 ENDIF()
 
+ADD_PLUGIN_DIRECTORY(cleaner)
+
 ##########to get all the variables of Cmake
 #GET_CMAKE_PROPERTY(MYVARS VARIABLES)
 #FOREACH(myvar ${MYVARS})
