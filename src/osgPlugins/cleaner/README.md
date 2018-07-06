@@ -13,7 +13,6 @@ We will therefore write a new [OpenSceneGraph](#openscenegraph) plugin to clean 
     ```
     LD_LIBRARY_PATH=/path/to/OSG/libs/ \
     OSG_NOTIFY_LEVEL=WARN \
-    OSG_OPTIMIZER=DEFAULT \
     osgconv sample.obj.cleaner sample.osgt
     ```
 

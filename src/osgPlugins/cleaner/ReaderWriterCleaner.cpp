@@ -28,7 +28,7 @@ class CleanerVisitor: public osg::NodeVisitor
         // Default constructor
         CleanerVisitor():_processed(),_isValidScene(true){}
         // Default destructor
-        ~CleanerVisitor(){}
+        virtual ~CleanerVisitor(){}
 
         void apply(osg::Geometry& geometry)
         {
@@ -52,18 +52,18 @@ class CleanerVisitor: public osg::NodeVisitor
         }
 
         // Detect, log, and dismiss/fix the geometry in case it has invalid vertices (NaN)
-        bool hasInvalidVertices(osg::Geometry *geometry)
+        bool hasInvalidVertices(const osg::Geometry *geometry)
         {
             return true;
         }
 
         // Detect, log, and normalize/create normals in case they are wrong or not existing
-        void cleanNormals(osg::Geometry *geometry)
+        void cleanNormals(const osg::Geometry *geometry)
         {
         }
 
         // Detect, log and dismiss/fix UVs if not valid (NaNs)
-        void cleanUVs(osg::Geometry *geometry)
+        void cleanUVs(const osg::Geometry *geometry)
         {
         }
 
